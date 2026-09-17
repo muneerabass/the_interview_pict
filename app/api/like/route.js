@@ -1,10 +1,10 @@
 import { NextResponse } from "next/server";
 import { revalidatePath } from "next/cache";
-import redis from "@/lib/redis";
 import { getMongoDb } from "@/lib/mongodb";
 import { requireSession } from "@/lib/auth";
 import { checkRateLimit } from "@/lib/rate-limit";
 import { jsonError } from "@/lib/api-response";
+import { invalidateAfterWrite } from "@/lib/cache";
 
 export async function POST(req) {
     // Liking as an arbitrary body-supplied email let anyone like on someone else's
@@ -63,15 +63,7 @@ export async function POST(req) {
 
         const likes = Array.isArray(result.likes) ? result.likes : [];
 
-        // The author's public profile caches aggregated like counts; without this
-        // the number there stayed stale for the full 5 minute TTL.
-        if (redis && result.email) {
-            try {
-                await redis.del(`public_profile_full_v2:${result.email}`);
-            } catch (err) {
-                console.warn("[cache] Like invalidation failed:", err?.message || err);
-            }
-        }
+        await invalidateAfterWrite(result.email, id);
 
         revalidatePath("/feed");
         revalidatePath(`/single/${id}`);

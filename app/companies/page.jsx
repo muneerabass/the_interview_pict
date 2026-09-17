@@ -17,6 +17,11 @@ export const metadata = {
             "Browse companies and read real interview experiences, hiring insights, and preparation tips.",
         url: "https://theinterviewroom.in/companies",
     },
+    twitter: {
+        title: "Companies | The Interview Room",
+        description:
+            "Browse companies and read real interview experiences, hiring insights, and preparation tips.",
+    },
 };
 
 async function loadDirectory() {

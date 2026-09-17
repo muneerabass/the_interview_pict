@@ -181,7 +181,7 @@ export default function HomePage() {
   // left it holding the last sentinel node and its callback closure alive.
   useEffect(() => () => observer.current?.disconnect(), []);
 
-  const fetchProfiles = useCallback(async (pageNumber, limit, sort, activeFilters, forceRefresh = false, excludedProfileIds = []) => {
+  const fetchProfiles = useCallback(async (pageNumber, limit, sort, activeFilters, forceRefresh = false, excludedProfileIds = [], cursorAnchor = null) => {
     // Avoid redundant fetches if already loading or no more profiles
     if (isFetchingRef.current && pageNumber > 0) return;
 
@@ -207,6 +207,14 @@ export default function HomePage() {
       if (forceRefresh) params.set("refresh", "true");
       if (sort === "random" && pageNumber > 0 && excludedProfileIds.length > 0) {
         params.set("exclude", excludedProfileIds.join(","));
+      }
+      // `page`/$skip gets slower the deeper you scroll; a cursor built from the
+      // last loaded item's own (date, _id) -- already in every feed row -- lets
+      // the server skip straight there instead. Only "latest" supports it
+      // (trending's window can widen mid-request, random has no stable order),
+      // and `page` still goes up above so nothing breaks if the cursor is unusable.
+      if (sort === "latest" && pageNumber > 0 && cursorAnchor?.date && cursorAnchor?._id) {
+        params.set("cursor", `${cursorAnchor.date}::${cursorAnchor._id}`);
       }
 
       const url = `/api/feed?${params.toString()}`;
@@ -345,7 +353,8 @@ export default function HomePage() {
       activeTab,
       filters,
       false,
-      activeTab === "random" ? profiles.map((profile) => profile._id) : []
+      activeTab === "random" ? profiles.map((profile) => profile._id) : [],
+      activeTab === "latest" && profiles.length > 0 ? profiles[profiles.length - 1] : null
     );
   }, [tabReady, page, activeTab, filters, fetchProfiles, itemsPerPage]);
 

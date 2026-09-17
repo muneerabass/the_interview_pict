@@ -48,6 +48,11 @@ export async function generateMetadata({ params }) {
                   ]
                 : undefined,
         },
+        twitter: {
+            title: `${title} | The Interview Room`,
+            description,
+            images: company.logo ? [company.logo] : undefined,
+        },
     };
 }
 

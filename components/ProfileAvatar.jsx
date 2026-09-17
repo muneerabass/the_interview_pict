@@ -1,9 +1,28 @@
 "use client";
-import React, { useState, useEffect, useMemo, useRef } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
+import Image from 'next/image';
 import { User } from 'lucide-react';
 
+// Users can set an arbitrary URL as their profile_pic (lib/utils.safeExternalUrl only
+// blocks dangerous schemes, not the host) -- next/image throws instead of rendering
+// when a src's host isn't in next.config.mjs's images.remotePatterns, so anything
+// outside that allowlist has to skip optimization rather than crash the card.
+const OPTIMIZABLE_HOSTS = new Set([
+  'lh3.googleusercontent.com',
+  'res.cloudinary.com',
+  'randomuser.me',
+  'images.unsplash.com',
+]);
+
+function isOptimizableSrc(url) {
+  try {
+    return OPTIMIZABLE_HOSTS.has(new URL(url).hostname);
+  } catch {
+    return false;
+  }
+}
+
 const ProfileAvatar = ({ src, alt, className, name }) => {
-  const imageRef = useRef(null);
   const [imageLoaded, setImageLoaded] = useState(false);
   const [imageError, setImageError] = useState(false);
 
@@ -11,12 +30,6 @@ const ProfileAvatar = ({ src, alt, className, name }) => {
   useEffect(() => {
     setImageError(false);
     setImageLoaded(false);
-
-    const image = imageRef.current;
-    if (image?.complete) {
-      if (image.naturalWidth > 0) setImageLoaded(true);
-      else setImageError(true);
-    }
   }, [src]);
 
   const { initials, bgColor } = useMemo(() => {
@@ -48,14 +61,16 @@ const ProfileAvatar = ({ src, alt, className, name }) => {
 
       {/* Image Layer - Fades in on top */}
       {showImage && (
-        <img
-          ref={imageRef}
+        <Image
           src={src}
           alt={alt}
+          fill
+          sizes="48px"
+          unoptimized={!isOptimizableSrc(src)}
           referrerPolicy="no-referrer"
           onLoad={() => setImageLoaded(true)}
           onError={() => setImageError(true)}
-          className={`absolute inset-0 h-full w-full object-cover transition-opacity duration-200 ${imageLoaded ? "opacity-100" : "opacity-0"}`}
+          className={`object-cover transition-opacity duration-200 ${imageLoaded ? "opacity-100" : "opacity-0"}`}
         />
       )}
     </div>

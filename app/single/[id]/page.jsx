@@ -22,6 +22,12 @@ import { headers } from "next/headers";
 import LikeButton from "@/components/LikeButton";
 import PostCompanyActions from "@/components/PostCompanyActions";
 
+// Every other page hardcodes this for canonical/OG tags rather than trusting the
+// request Host header, so this domain-migration alias (pict.live -> theinterviewroom.in)
+// doesn't split ranking signals between hosts. Internal self-fetches still use the
+// request-derived baseUrl below -- those must hit whichever host is actually serving.
+const CANONICAL_ORIGIN = "https://theinterviewroom.in";
+
 const CommentsSection = dynamic(() => import("@/components/CommentsSection"), {
   ssr: true,
   loading: () => (
@@ -53,17 +59,20 @@ const getExperienceData = cache(async (id, baseUrl, cookie = "") => {
       next: { revalidate: 0 }
     });
 
-    if (!expResponse.ok) return { data: null, articles: [] };
+    if (!expResponse.ok) return { data: null, articles: [], hasCompanyPage: false };
 
     const expData = await expResponse.json();
     const isTale = expData?.content_type === "tale";
 
-    const relatedResponse = await fetch(`${baseUrl}/api/topStories?itemsPerPage=12&type=${isTale ? "tale" : "interview"}&_ts=${Date.now()}`, {
-      cache: "no-store",
-      next: { revalidate: 0 }
-    });
-
-    const relatedData = relatedResponse.ok ? await relatedResponse.json() : [];
+    // Neither depends on the other, only on expData above -- no reason to make
+    // the company-page check wait for the related-articles round trip.
+    const [relatedData, hasCompanyPage] = await Promise.all([
+      fetch(`${baseUrl}/api/topStories?itemsPerPage=12&type=${isTale ? "tale" : "interview"}&_ts=${Date.now()}`, {
+        cache: "no-store",
+        next: { revalidate: 0 }
+      }).then((res) => (res.ok ? res.json() : [])),
+      companyPageExists(expData?.company),
+    ]);
 
     const data = {
       ...expData,
@@ -82,10 +91,10 @@ const getExperienceData = cache(async (id, baseUrl, cookie = "") => {
       .filter((article, index, arr) => arr.findIndex((a) => a.uid === article.uid) === index)
       .slice(0, 8);
 
-    return { data, articles };
+    return { data, articles, hasCompanyPage };
   } catch (error) {
     console.error("Data fetch error:", error);
-    return { data: null, articles: [] };
+    return { data: null, articles: [], hasCompanyPage: false };
   }
 });
 
@@ -112,19 +121,19 @@ export async function generateMetadata({ params }) {
     ? `Read ${data?.name}'s story: ${data?.title || "a general experience"}.`
     : `Read ${data?.name}'s interview experience at ${data?.company || "a top company"}.`;
   const canonical = `/single/${id}`;
-  const ogImage = data?.profile_pic || `${baseUrl}/app_icon.png`;
+  const ogImage = data?.profile_pic || "/app_icon.png";
 
   return {
     title,
     description,
-    metadataBase: new URL(baseUrl),
+    metadataBase: new URL(CANONICAL_ORIGIN),
     alternates: {
       canonical,
     },
     openGraph: {
       title: `${title} | The Interview Room`,
       description,
-      url: `${baseUrl}${canonical}`,
+      url: `${CANONICAL_ORIGIN}${canonical}`,
       images: [{ url: ogImage, alt: title }],
     },
     twitter: {
@@ -160,7 +169,7 @@ export default async function SimilarExperience({ params }) {
   // stayed indexable soft-404s and users never saw a real 404 page.
   if (!id) notFound();
 
-  const { data, articles } = await getExperienceData(id, baseUrl, (await headers()).get("cookie") || "");
+  const { data, articles, hasCompanyPage } = await getExperienceData(id, baseUrl, (await headers()).get("cookie") || "");
 
   if (!data) notFound();
 
@@ -178,16 +187,15 @@ export default async function SimilarExperience({ params }) {
       day: "numeric",
     });
   };
-  const articleUrl = `${baseUrl}/single/${id}`;
+  const articleUrl = `${CANONICAL_ORIGIN}/single/${id}`;
   const isTale = data?.content_type === "tale";
   const articleDescription = isTale
     ? `Read ${data?.name}'s tale about ${data?.company || "their experience"}.`
     : `Read ${data?.name}'s detailed interview experience as ${data?.role} at ${data?.company}.`;
-  const profilePicUrl = data?.profile_pic || `${baseUrl}/app_icon.png`;
+  const profilePicUrl = data?.profile_pic || `${CANONICAL_ORIGIN}/app_icon.png`;
   const publicProfilePath = data?.email ? `/profile/public/${encodeURIComponent(data.email)}` : null;
   const readMinutes = Math.max(1, Math.round((data?.exp_text || "").split(/\s+/).filter(Boolean).length / 220));
   const isToday = data?.date && new Date(data.date).toDateString() === new Date().toDateString();
-  const hasCompanyPage = await companyPageExists(data?.company);
   const experienceObjectId =
     typeof data?._id === "string" ? data._id : data?._id?.$oid ? data._id.$oid : String(data?._id || "");
 
@@ -211,10 +219,10 @@ export default async function SimilarExperience({ params }) {
           image: profilePicUrl,
           publisher: {
             "@type": "Organization",
-            name: "theInterview",
+            name: "The Interview Room",
             logo: {
               "@type": "ImageObject",
-              url: `${baseUrl}/app_icon.png`,
+              url: `${CANONICAL_ORIGIN}/app_icon.png`,
             },
           },
           description: articleDescription,
@@ -349,7 +357,7 @@ export default async function SimilarExperience({ params }) {
                         <Eye size={14} className="text-blue-600 dark:text-blue-300" />
                         {data?.views} reads
                       </p>
-                      <p className="text-[12px] font-medium text-slate-500 dark:text-slate-400">Shared on theInterview tales feed</p>
+                      <p className="text-[12px] font-medium text-slate-500 dark:text-slate-400">Shared on The Interview Room tales feed</p>
                     </footer>
                   </>
                 ) : (
@@ -468,7 +476,7 @@ export default async function SimilarExperience({ params }) {
                         <Eye size={14} className="text-blue-600 dark:text-blue-300" />
                         {data?.views} reads
                       </p>
-                      <p className="text-[12px] font-medium text-slate-500 dark:text-slate-400">Shared on theInterview community feed</p>
+                      <p className="text-[12px] font-medium text-slate-500 dark:text-slate-400">Shared on The Interview Room community feed</p>
                     </footer>
                   </>
                 )}

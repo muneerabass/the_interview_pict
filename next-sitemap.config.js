@@ -14,6 +14,14 @@ const DB_NAME = process.env.MONGODB_DB_NAME || "int-exp";
 // Keep the two in sync when Tales ships.
 const TALES_ENABLED = false;
 
+// next-sitemap requires lastmod to be a valid W3C/ISO-8601 string; Mongo gives
+// back Date objects (whose default toString() is not ISO) or already-ISO strings.
+function toIsoLastmod(value) {
+  if (!value) return undefined;
+  const parsed = new Date(value);
+  return Number.isNaN(parsed.getTime()) ? undefined : parsed.toISOString();
+}
+
 async function getDynamicContentPaths() {
   if (!process.env.MONGODB_URI) {
     console.warn("Dynamic sitemap paths skipped: MONGODB_URI is unavailable.");
@@ -60,17 +68,18 @@ async function getDynamicContentPaths() {
       if (!post.uid || postPaths.has(post.uid)) return;
       postPaths.set(post.uid, {
         loc: `/single/${encodeURIComponent(post.uid)}`,
-        lastmod: post.date || undefined,
+        lastmod: toIsoLastmod(post.date),
         changefreq: "weekly",
         priority: 0.7,
       });
     });
 
     return [
+      { loc: "/companies", changefreq: "daily", priority: 0.6 },
       ...postPaths.values(),
       ...companies.map((company) => ({
         loc: `/companies/${encodeURIComponent(company.slug)}`,
-        lastmod: company.updatedAt || company.createdAt || undefined,
+        lastmod: toIsoLastmod(company.updatedAt || company.createdAt),
         changefreq: "weekly",
         priority: 0.7,
       })),

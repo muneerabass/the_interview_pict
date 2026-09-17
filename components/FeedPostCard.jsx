@@ -57,6 +57,10 @@ export default function FeedPostCard({ profile, onCompanyFilter }) {
   const role = isTale ? "" : profile?.role;
   const readPath = `/single/${profile?.uid || profile?._id}`;
   const openPost = () => router.push(readPath);
+  // The card can't be a <Link> outright -- it already nests a company-page
+  // <Link>, and an <a> can't contain another <a>. Prefetching by hand on
+  // hover/focus gets the same head start next/link gives ArticleCard.
+  const prefetchPost = () => router.prefetch(readPath);
 
   const dateObj = profile?.date ? new Date(profile.date) : null;
   const timeAgo =
@@ -99,6 +103,9 @@ export default function FeedPostCard({ profile, onCompanyFilter }) {
           openPost();
         }
       }}
+      onMouseEnter={prefetchPost}
+      onFocus={prefetchPost}
+      onTouchStart={prefetchPost}
       className={`group cursor-pointer rounded-xl border border-slate-200 bg-white px-4 py-3.5 transition duration-150 hover:border-slate-300 hover:shadow-sm dark:border-slate-800 dark:bg-slate-900 dark:hover:border-slate-700 sm:px-5 sm:py-4 ${isTale ? "border-l-2 border-l-emerald-500 dark:border-l-emerald-400" : ""}`}
     >
       {/* meta row — community · author · time */}

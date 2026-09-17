@@ -22,7 +22,9 @@
     "test:security": "node test/security-smoke.mjs",
     "test:placements": "node test/placement-stats.mjs",
     "fix:company-slugs": "node scripts/fix-company-slugs.mjs",
-    "fix:company-slugs:dry": "node scripts/fix-company-slugs.mjs --dry-run"
+    "fix:company-slugs:dry": "node scripts/fix-company-slugs.mjs --dry-run",
+    "create:post-indexes": "node scripts/create-post-indexes.mjs",
+    "create:post-indexes:dry": "node scripts/create-post-indexes.mjs --dry-run"
   },
   "dependencies": {
     "@base-ui/react": "^1.3.0",

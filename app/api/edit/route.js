@@ -1,5 +1,4 @@
 import { NextResponse } from "next/server";
-import redis from "@/lib/redis";
 import { getMongoDb } from "@/lib/mongodb";
 import { requireSession } from "@/lib/auth";
 import { jsonError } from "@/lib/api-response";
@@ -11,22 +10,7 @@ import {
     normalizeTags,
     validateExpText,
 } from "@/lib/post-input";
-
-async function invalidateAfterEdit(email) {
-    if (!email || !redis) return;
-
-    const keys = [
-        `profile_posts_${encodeURIComponent(email)}`,
-        `public_profile_full_v2:${email}`,
-        `user_profile_data:${email}`
-    ];
-
-    try {
-        await redis.del(keys);
-    } catch (err) {
-        console.warn("[cache] Edit invalidation failed:", err?.message || err);
-    }
-}
+import { invalidateAfterWrite } from "@/lib/cache";
 
 const SHORT_TEXT_FIELDS = ["company", "college", "branch", "batch", "role", "title"];
 
@@ -85,7 +69,7 @@ export async function PUT(req) {
             return NextResponse.json({ message: "No matching experience found" }, { status: 404 });
         }
 
-        await invalidateAfterEdit(auth.email);
+        await invalidateAfterWrite(auth.email, uid);
 
         return NextResponse.json({ message: "Experience updated successfully", uid }, { status: 200 });
     } catch (error) {

@@ -3,30 +3,13 @@ import { nanoid } from "nanoid";
 import slugify from "slugify";
 import { companySlugFromName } from "@/lib/companySlug";
 import nodemailer from "nodemailer";
-import redis from "@/lib/redis";
 import { getMongoDb } from "@/lib/mongodb";
 import { normalizeCategory, normalizeShortText, normalizeTags, validateExpText } from "@/lib/post-input";
 import { requireSession } from "@/lib/auth";
 import { checkRateLimit } from "@/lib/rate-limit";
 import { escapeHtml } from "@/lib/utils";
 import { jsonError } from "@/lib/api-response";
-
-
-async function invalidateAfterWrite(email) {
-  if (!email || !redis) return;
-
-  const keys = [
-    `profile_posts_${encodeURIComponent(email)}`,
-    `public_profile_full_v2:${email}`,
-    `user_profile_data:${email}`
-  ];
-
-  try {
-    await redis.del(keys);
-  } catch (err) {
-    console.warn("[cache] Invalidation failed:", err?.message || err);
-  }
-}
+import { invalidateAfterWrite } from "@/lib/cache";
 
 export async function POST(req) {
   // Unauthenticated post creation let anyone publish as another user -- and was

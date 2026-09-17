@@ -1,25 +1,9 @@
 import { NextResponse } from "next/server";
 import { checkRateLimit } from "@/lib/rate-limit";
-import redis from "@/lib/redis";
 import { getMongoDb } from "@/lib/mongodb";
 import { requireSession } from "@/lib/auth";
 import { jsonError } from "@/lib/api-response";
-
-async function invalidateAfterDelete(email) {
-  if (!email || !redis) return;
-
-  const keys = [
-    `profile_posts_${encodeURIComponent(email)}`,
-    `public_profile_full_v2:${email}`,
-    `user_profile_data:${email}`,
-  ];
-
-  try {
-    await redis.del(keys);
-  } catch (err) {
-    console.warn("[cache] Delete invalidation failed:", err?.message || err);
-  }
-}
+import { invalidateAfterWrite } from "@/lib/cache";
 
 // DELETE Handler
 export async function DELETE(req) {
@@ -51,7 +35,7 @@ export async function DELETE(req) {
       return NextResponse.json({ message: "No matching experience found" }, { status: 404 });
     }
 
-    await invalidateAfterDelete(auth.email);
+    await invalidateAfterWrite(auth.email, uid);
 
     return NextResponse.json({ message: "Experience deleted successfully" }, { status: 200 });
   } catch (error) {

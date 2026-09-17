@@ -30,6 +30,17 @@ function initialsFromName(name) {
   return `${parts[0][0]}${parts[1][0]}`.toUpperCase();
 }
 
+function buildOptimisticAuthor(session) {
+  const name = session?.user?.name || null;
+  return {
+    name,
+    profilePic: session?.user?.image || null,
+    initials: initialsFromName(name),
+    batch: null,
+    branch: null,
+  };
+}
+
 function updateMetaOnCreate(prevMeta, type) {
   const nextType = type && prevMeta.countsByType[type] !== undefined ? type : "general";
   return {
@@ -90,6 +101,60 @@ function updateResolvedInTree(nodes, commentId, isResolved) {
       replies: updateResolvedInTree(node.replies, commentId, isResolved),
     };
   });
+}
+
+function replaceCommentInTree(nodes, commentId, replacement) {
+  return nodes.map((node) => {
+    if (node.id === commentId) {
+      return { ...replacement, replies: node.replies };
+    }
+    if (!Array.isArray(node.replies) || node.replies.length === 0) {
+      return node;
+    }
+    return {
+      ...node,
+      replies: replaceCommentInTree(node.replies, commentId, replacement),
+    };
+  });
+}
+
+// Mirrors addReplyToTree's count bookkeeping so an optimistic reply that
+// failed to save can be undone without leaving replyCount/nestedCount stale.
+function removeReplyFromTree(nodes, parentId, replyId) {
+  let removed = false;
+
+  const nextNodes = nodes.map((node) => {
+    if (node.id === parentId) {
+      removed = true;
+      const nextReplies = Array.isArray(node.replies)
+        ? node.replies.filter((reply) => reply.id !== replyId)
+        : [];
+      return {
+        ...node,
+        replyCount: Math.max(0, (node.replyCount || 0) - 1),
+        nestedCount: Math.max(0, (node.nestedCount || 0) - 1),
+        replies: nextReplies,
+      };
+    }
+
+    if (!Array.isArray(node.replies) || node.replies.length === 0) {
+      return node;
+    }
+
+    const childResult = removeReplyFromTree(node.replies, parentId, replyId);
+    if (childResult.removed) {
+      removed = true;
+      return {
+        ...node,
+        nestedCount: Math.max(0, (node.nestedCount || 0) - 1),
+        replies: childResult.nodes,
+      };
+    }
+
+    return node;
+  });
+
+  return { nodes: nextNodes, removed };
 }
 
 function updateUpvoteInTree(nodes, commentId, nextHasUpvoted, nextUpvotesCount = null) {
@@ -274,6 +339,40 @@ export default function CommentsSection({ experienceId, companyName, articleAuth
     if (!trimmed || posting) return;
     setPosting(true);
     setError("");
+
+    const tempId = `temp-${Date.now()}`;
+    const optimisticComment = {
+      id: tempId,
+      experienceId,
+      parentCommentId: null,
+      rootCommentId: null,
+      depth: 0,
+      level: 1,
+      text: trimmed,
+      type: composeType,
+      isResolved: false,
+      upvotesCount: 0,
+      hasUpvoted: false,
+      canReply: true,
+      canResolve: composeType === "doubt",
+      isOwnComment: true,
+      author: buildOptimisticAuthor(session),
+      companyTag: null,
+      timeAgo: "Just now",
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+      replyCount: 0,
+      nestedCount: 0,
+      replies: [],
+    };
+
+    setComments((prev) => (sort === "recent" ? [optimisticComment, ...prev] : [...prev, optimisticComment]));
+    setMeta((prev) => updateMetaOnCreate(prev, composeType));
+    // The list renders `filteredComments`: posting a "general" comment while
+    // the "tips" pill was active showed nothing at all, so people posted again.
+    setFilter((prev) => (prev === "all" || prev === composeType ? prev : "all"));
+    setComposeText("");
+
     try {
       const res = await fetch("/api/comments", {
         method: "POST",
@@ -291,17 +390,20 @@ export default function CommentsSection({ experienceId, companyName, articleAuth
       }
       const created = json?.comment;
       if (created && !created.parentCommentId) {
-        setComments((prev) => {
-          return sort === "recent" ? [created, ...prev] : [...prev, created];
-        });
-        setMeta((prev) => updateMetaOnCreate(prev, created.type));
-        // The list renders `filteredComments`: posting a "general" comment while
-        // the "tips" pill was active showed nothing at all, so people posted again.
-        setFilter((prev) => (prev === "all" || prev === created.type ? prev : "all"));
+        setComments((prev) => replaceCommentInTree(prev, tempId, created));
       }
-      setComposeText("");
     } catch (err) {
       setError(err.message || "Failed to post comment");
+      setComments((prev) => prev.filter((node) => node.id !== tempId));
+      setMeta((prev) => ({
+        ...prev,
+        totalComments: Math.max(0, (prev.totalComments || 0) - 1),
+        countsByType: {
+          ...prev.countsByType,
+          [composeType]: Math.max(0, (prev.countsByType[composeType] || 0) - 1),
+        },
+      }));
+      setComposeText(trimmed);
     } finally {
       setPosting(false);
     }
@@ -316,6 +418,39 @@ export default function CommentsSection({ experienceId, companyName, articleAuth
     if (!value || postingReplyId) return;
     setPostingReplyId(parent.id);
     setError("");
+
+    const tempId = `temp-${Date.now()}`;
+    const parentDepth = parent.depth || 0;
+    const optimisticReply = {
+      id: tempId,
+      experienceId,
+      parentCommentId: parent.id,
+      rootCommentId: parent.rootCommentId || parent.id,
+      depth: parentDepth + 1,
+      level: parentDepth + 2,
+      text: value,
+      type: "general",
+      isResolved: false,
+      upvotesCount: 0,
+      hasUpvoted: false,
+      canReply: parentDepth + 1 < 2,
+      canResolve: false,
+      isOwnComment: true,
+      author: buildOptimisticAuthor(session),
+      companyTag: null,
+      timeAgo: "Just now",
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+      replyCount: 0,
+      nestedCount: 0,
+      replies: [],
+    };
+
+    setComments((prev) => addReplyToTree(prev, parent.id, optimisticReply).nodes);
+    setMeta((prev) => updateMetaOnCreate(prev, "general"));
+    setReplyDrafts((prev) => ({ ...prev, [parent.id]: "" }));
+    setExpanded((prev) => ({ ...prev, [parent.id]: true }));
+
     try {
       const res = await fetch("/api/comments", {
         method: "POST",
@@ -333,14 +468,21 @@ export default function CommentsSection({ experienceId, companyName, articleAuth
         throw new Error(json?.error || (res.status === 401 ? "Please sign in again." : "Failed to post reply"));
       }
       const createdReply = json?.comment;
-      if (createdReply?.parentCommentId) {
-        setComments((prev) => addReplyToTree(prev, createdReply.parentCommentId, createdReply).nodes);
-        setMeta((prev) => updateMetaOnCreate(prev, createdReply.type));
+      if (createdReply) {
+        setComments((prev) => replaceCommentInTree(prev, tempId, createdReply));
       }
-      setReplyDrafts((prev) => ({ ...prev, [parent.id]: "" }));
-      setExpanded((prev) => ({ ...prev, [parent.id]: true }));
     } catch (err) {
       setError(err.message || "Failed to post reply");
+      setComments((prev) => removeReplyFromTree(prev, parent.id, tempId).nodes);
+      setMeta((prev) => ({
+        ...prev,
+        totalComments: Math.max(0, (prev.totalComments || 0) - 1),
+        countsByType: {
+          ...prev.countsByType,
+          general: Math.max(0, (prev.countsByType.general || 0) - 1),
+        },
+      }));
+      setReplyDrafts((prev) => ({ ...prev, [parent.id]: value }));
     } finally {
       setPostingReplyId("");
     }
@@ -353,10 +495,19 @@ export default function CommentsSection({ experienceId, companyName, articleAuth
     }
     if (resolvingId) return;
 
+    const previousResolved = Boolean(item.isResolved);
+    const optimisticResolved = !previousResolved;
+    const action = previousResolved ? "unresolve" : "resolve";
+
     setResolvingId(item.id);
     setError("");
+    setComments((prev) => updateResolvedInTree(prev, item.id, optimisticResolved));
+    setMeta((prev) => ({
+      ...prev,
+      resolvedCount: Math.max(0, (prev.resolvedCount || 0) + (optimisticResolved ? 1 : -1)),
+    }));
+
     try {
-      const action = item.isResolved ? "unresolve" : "resolve";
       const res = await fetch("/api/comments", {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
@@ -372,16 +523,20 @@ export default function CommentsSection({ experienceId, companyName, articleAuth
       }
 
       const nextResolved = Boolean(json?.comment?.isResolved);
-      setComments((prev) => updateResolvedInTree(prev, item.id, nextResolved));
-      setMeta((prev) => {
-        const delta = nextResolved ? (item.isResolved ? 0 : 1) : item.isResolved ? -1 : 0;
-        return {
+      if (nextResolved !== optimisticResolved) {
+        setComments((prev) => updateResolvedInTree(prev, item.id, nextResolved));
+        setMeta((prev) => ({
           ...prev,
-          resolvedCount: Math.max(0, (prev.resolvedCount || 0) + delta),
-        };
-      });
+          resolvedCount: Math.max(0, (prev.resolvedCount || 0) + (nextResolved ? 1 : -1) - (optimisticResolved ? 1 : -1)),
+        }));
+      }
     } catch (err) {
       setError(err.message || "Failed to update status");
+      setComments((prev) => updateResolvedInTree(prev, item.id, previousResolved));
+      setMeta((prev) => ({
+        ...prev,
+        resolvedCount: Math.max(0, (prev.resolvedCount || 0) + (previousResolved ? 1 : -1)),
+      }));
     } finally {
       setResolvingId("");
     }

@@ -36,10 +36,29 @@ function addContentTypeFilter(match, contentType) {
   match.content_type = contentType;
 }
 
+// "<isoDate>::<objectIdHex>" from the last item of the previous page (both
+// fields the feed already returns on every item -- no extra endpoint needed).
+// Only meaningful for the default `{date:-1,_id:-1}` sort: trending's window
+// can widen mid-request (see the empty-result fallback below) and random's
+// $sample has no stable order, so a cursor computed against either can't be
+// trusted to stay valid.
+function parseFeedCursor(raw) {
+  if (!raw) return null;
+  const separator = raw.lastIndexOf("::");
+  if (separator === -1) return null;
+
+  const date = raw.slice(0, separator);
+  const idPart = raw.slice(separator + 2);
+  if (!date || !mongoose.Types.ObjectId.isValid(idPart)) return null;
+
+  return { date, id: new mongoose.Types.ObjectId(idPart) };
+}
+
 function buildPipeline({
   sort,
   page,
   itemsPerPage,
+  cursor,
   companyFilter,
   collegeFilter,
   branchFilter,
@@ -83,6 +102,22 @@ function buildPipeline({
     match.date = { $gte: lastWeek.toISOString() };
   }
 
+  const usesCursor = Boolean(cursor) && sort !== FEED_SORT_TRENDING;
+  if (usesCursor) {
+    const cursorClause = {
+      $or: [
+        { date: { $lt: cursor.date } },
+        { date: cursor.date, _id: { $lt: cursor.id } },
+      ],
+    };
+    if (match.$or) {
+      match.$and = [...(match.$and || []), { $or: match.$or }, cursorClause];
+      delete match.$or;
+    } else {
+      match.$and = [...(match.$and || []), cursorClause];
+    }
+  }
+
   pipeline.push({ $match: match });
 
   pipeline.push(
@@ -92,7 +127,7 @@ function buildPipeline({
           ? { views: -1, date: -1, _id: -1 }
           : { date: -1, _id: -1 },
     },
-    { $skip: page * itemsPerPage },
+    ...(usesCursor ? [] : [{ $skip: page * itemsPerPage }]),
     { $limit: itemsPerPage },
     {
       $lookup: {
@@ -156,6 +191,7 @@ export async function GET(req) {
     const rawPage = Number.parseInt(req.nextUrl.searchParams.get("page") || "0", 10);
     const rawItemsPerPage = Number.parseInt(req.nextUrl.searchParams.get("itemsPerPage") || "10", 10);
     const page = Number.isFinite(rawPage) && rawPage >= 0 ? Math.min(rawPage, 1000) : 0;
+    const cursor = parseFeedCursor(req.nextUrl.searchParams.get("cursor"));
     const itemsPerPage = Number.isFinite(rawItemsPerPage) && rawItemsPerPage > 0
       ? Math.min(rawItemsPerPage, 20)
       : 10;
@@ -176,6 +212,9 @@ export async function GET(req) {
       if (limited) return limited;
     }
     const sort = req.nextUrl.searchParams.get("sort") || "latest";
+    // Kicked off now so it resolves alongside the DB work below instead of
+    // adding its own round trip afterward.
+    const sessionPromise = getServerSession(authOptions);
     const excludedIds = (req.nextUrl.searchParams.get("exclude") || "")
       .split(",")
       .filter((id) => mongoose.Types.ObjectId.isValid(id))
@@ -256,7 +295,7 @@ export async function GET(req) {
         { $project: { author_info: 0 } }
       ]).toArray();
     } else {
-      const pipeline = buildPipeline({ sort, page, itemsPerPage, companyFilter, collegeFilter, branchFilter, batchFilter, authorFilter, categoryFilter, contentType, searchQuery, authorEmails });
+      const pipeline = buildPipeline({ sort, page, itemsPerPage, cursor, companyFilter, collegeFilter, branchFilter, batchFilter, authorFilter, categoryFilter, contentType, searchQuery, authorEmails });
 
       feed = await collection.aggregate(pipeline).toArray();
 
@@ -272,7 +311,7 @@ export async function GET(req) {
       }
     }
 
-    const session = await getServerSession(authOptions);
+    const session = await sessionPromise;
     const viewerEmail = normalizeEmail(session?.user?.email);
     const data = processFeedResults(feed, viewerEmail);
 
