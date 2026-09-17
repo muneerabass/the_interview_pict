@@ -197,6 +197,11 @@ body {
   letter-spacing: var(--ui-letter-spacing);
   font-weight: 400;
   color: var(--ui-text-primary);
+  // Client-side route changes reset scrollY in JS (ScrollViewTracker), but
+  // the browser's scroll anchoring then "corrects" it back as async content
+  // (images, the comments skeleton) loads and shifts layout above the fold --
+  // exactly the case a route swap is, not the in-place reflow anchoring is for.
+  overflow-anchor: none;
 }
 
 h1,

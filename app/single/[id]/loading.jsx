@@ -1,8 +1,18 @@
+"use client";
+
+import { useLayoutEffect } from "react";
 import SingleExperienceThemeShell from "@/components/SingleExperienceThemeShell";
 
 const pulse = "animate-pulse rounded-lg bg-slate-200 dark:bg-slate-700";
 
 export default function Loading() {
+  // This skeleton mounts immediately on navigation, before the real page
+  // (and its own scroll-to-top in ScrollViewTracker) is ready -- without this,
+  // it renders at whatever scrollY the previous page was left at.
+  useLayoutEffect(() => {
+    window.scrollTo(0, 0);
+  }, []);
+
   return (
     <SingleExperienceThemeShell>
       <div className="relative min-h-screen overflow-x-clip bg-slate-50 dark:bg-slate-950">
