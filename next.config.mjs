@@ -6,6 +6,8 @@ const __dirname = path.dirname(__filename);
 
 /** @type {import('next').NextConfig} */
 const nextConfig = {
+  // Self-contained server bundle for the Cloud Run container (see Dockerfile).
+  output: "standalone",
   typescript: {
     ignoreBuildErrors: false,
   },

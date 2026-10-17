@@ -1,0 +1,9 @@
+node_modules
+.next
+.git
+.netlify
+.env
+.env.local
+.env.*.local
+*.log
+test

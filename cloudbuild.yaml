@@ -1,0 +1,46 @@
+# Build the image and roll it out to Cloud Run. Point a Cloud Build trigger on
+# pushes to main at this file, or run: gcloud builds submit --config cloudbuild.yaml
+# Service settings (env, secrets, scaling) live on the Cloud Run service itself
+# and carry over to every new revision, so only the image changes here.
+steps:
+  - name: gcr.io/cloud-builders/docker
+    entrypoint: bash
+    env: [DOCKER_BUILDKIT=1]
+    secretEnv: [MONGODB_URI]
+    args:
+      - -c
+      - |
+        printf '%s' "$$MONGODB_URI" > /tmp/mongodb_uri
+        docker build --secret id=mongodb_uri,src=/tmp/mongodb_uri \
+          -t ${_REGION}-docker.pkg.dev/$PROJECT_ID/web/interview-room:$BUILD_ID .
+  - name: gcr.io/cloud-builders/docker
+    args: [push, "${_REGION}-docker.pkg.dev/$PROJECT_ID/web/interview-room:$BUILD_ID"]
+  - name: gcr.io/google.com/cloudsdktool/cloud-sdk:slim
+    entrypoint: gcloud
+    args:
+      - run
+      - deploy
+      - interview-room
+      - --image=${_REGION}-docker.pkg.dev/$PROJECT_ID/web/interview-room:$BUILD_ID
+      - --region=${_REGION}
+      - --service-account=web-run@$PROJECT_ID.iam.gserviceaccount.com
+  # Next marks prerendered pages like /feed cacheable for a year, and those HTML
+  # files point at this build's hashed JS chunks. Vercel purges its CDN on every
+  # deploy; on GCP we must, or the CDN keeps serving pages whose chunks are gone.
+  # Tolerates the load balancer not existing yet (first deploys).
+  - name: gcr.io/google.com/cloudsdktool/cloud-sdk:slim
+    entrypoint: bash
+    args:
+      - -c
+      - gcloud compute url-maps invalidate-cdn-cache web-map --path="/*" --async || echo "no CDN yet, skipping purge"
+
+availableSecrets:
+  secretManager:
+    - versionName: projects/$PROJECT_ID/secrets/mongodb-uri/versions/latest
+      env: MONGODB_URI
+
+substitutions:
+  _REGION: asia-south1
+
+options:
+  logging: CLOUD_LOGGING_ONLY
