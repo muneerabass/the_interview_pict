@@ -274,7 +274,7 @@ export default function HomePage() {
     }
 
     if (saved?.filters) setFilters(pickFilters(saved.filters));
-    setActiveTab(SORT_TABS.includes(saved?.tab) ? saved.tab : "random");
+    setActiveTab(SORT_TABS.includes(saved?.tab) ? saved.tab : "latest");
   }, [activeTab]);
 
   useEffect(() => {

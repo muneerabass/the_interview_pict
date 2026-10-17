@@ -8,6 +8,16 @@ export default function FeedSearch({ contentType = "interview", onSearchChange }
   const emittedQueryRef = useRef("");
   const [query, setQuery] = useState("");
 
+  const updateQuery = (value) => {
+    setQuery(value);
+    if (value.trim()) return;
+
+    // Clearing should restore the full feed immediately. Mark it emitted so
+    // the debounce effect below doesn't send a duplicate empty search.
+    emittedQueryRef.current = "";
+    onSearchChange("");
+  };
+
   useEffect(() => {
     const normalized = query.trim();
     if (normalized === emittedQueryRef.current) return undefined;
@@ -38,10 +48,10 @@ export default function FeedSearch({ contentType = "interview", onSearchChange }
         ref={inputRef}
         type="search"
         value={query}
-        onChange={(event) => setQuery(event.target.value)}
+        onChange={(event) => updateQuery(event.target.value)}
         onKeyDown={(event) => {
           if (event.key === "Escape") {
-            setQuery("");
+            updateQuery("");
             inputRef.current?.blur();
           }
         }}
@@ -54,7 +64,7 @@ export default function FeedSearch({ contentType = "interview", onSearchChange }
         <button
           type="button"
           onClick={() => {
-            setQuery("");
+            updateQuery("");
             inputRef.current?.focus();
           }}
           className="absolute right-3 inline-flex h-7 w-7 items-center justify-center rounded-md text-slate-400 hover:bg-slate-100 hover:text-slate-700 dark:hover:bg-slate-800 dark:hover:text-slate-200"

@@ -70,6 +70,18 @@ export function useLike(id, initial = []) {
         const data = await res.json().catch(() => null);
         if (typeof data?.count === "number") {
           setState({ count: data.count, liked: Boolean(data.liked) });
+
+          // The feed caches full post cards in sessionStorage. Without clearing
+          // those snapshots, a reload can restore the pre-like count for up to
+          // a minute without asking the API for the persisted value.
+          try {
+            for (let index = sessionStorage.length - 1; index >= 0; index -= 1) {
+              const key = sessionStorage.key(index);
+              if (key?.startsWith("feed_state_v4:")) sessionStorage.removeItem(key);
+            }
+          } catch (error) {
+            console.warn("Failed to clear stale feed cache after like:", error);
+          }
         }
       } catch (error) {
         console.error("Failed to toggle like:", error);
